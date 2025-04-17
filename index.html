@@ -94,19 +94,34 @@ class Player {
     this.vy = 0;
     this.onGround = false;
     this.acc = 0.5;
+    this.accTap = 0.15;
+    this.holdThreshold = 150; // ms
     this.maxSpeed = 4;
     this.friction = 0.8;
     this.left = false;
     this.right = false;
+    this.leftTime = 0;
+    this.rightTime = 0;
   }
   update() {
     this.vy += gravity;
-    if (this.left) this.vx -= this.acc;
-    if (this.right) this.vx += this.acc;
+    const now = performance.now();
+    if (this.left) {
+      const dt = now - this.leftTime;
+      const a = dt < this.holdThreshold ? this.accTap : this.acc;
+      this.vx -= a;
+    }
+    if (this.right) {
+      const dt = now - this.rightTime;
+      const a = dt < this.holdThreshold ? this.accTap : this.acc;
+      this.vx += a;
+    }
+
     if (!this.left && !this.right) {
       this.vx *= this.friction;
       if (Math.abs(this.vx) < 0.1) this.vx = 0;
     }
+
     this.vx = Math.max(-this.maxSpeed, Math.min(this.vx, this.maxSpeed));
 
     const oldX = this.x;
@@ -114,7 +129,7 @@ class Player {
     let newX = oldX + this.vx;
     let newY = oldY + this.vy;
 
-    // horizontal collision: skip block under feet with tolerance
+    // horizontal collision skip feet
     for (let b of blocks) {
       if (!b.static) continue;
       if (Math.abs(oldY + this.h - b.y) < 2) continue;
@@ -131,7 +146,6 @@ class Player {
     }
     newX = Math.max(0, Math.min(newX, W - this.w));
 
-    // vertical collision
     let grounded = false;
     if (newY + this.h > H) {
       newY = H - this.h;
@@ -215,8 +229,14 @@ function endGame(msg) {
   setTimeout(() => { alert(msg); window.location.reload(); }, 10);
 }
 window.addEventListener('keydown', e => {
-  if (e.key === 'ArrowLeft' || e.key === 'a') player.left = true;
-  if (e.key === 'ArrowRight' || e.key === 'd') player.right = true;
+  if (e.key === 'ArrowLeft' || e.key === 'a') {
+    if (!player.left) player.leftTime = performance.now();
+    player.left = true;
+  }
+  if (e.key === 'ArrowRight' || e.key === 'd') {
+    if (!player.right) player.rightTime = performance.now();
+    player.right = true;
+  }
   if ([' ', 'ArrowUp', 'w'].includes(e.key)) player.jump();
 });
 window.addEventListener('keyup', e => {
