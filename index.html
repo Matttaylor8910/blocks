@@ -5,13 +5,168 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Retro Jump Game</title>
   <style>
-    html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
-    canvas { display: block; background: #111; image-rendering: pixelated; }
+    @font-face {
+      font-family: 'Arcade';
+      src: url('https://cdnjs.cloudflare.com/ajax/libs/webfont/1.6.28/webfontloader.js');
+      font-display: swap;
+    }
+    
+    html, body { 
+      margin: 0; 
+      padding: 0; 
+      overflow: hidden; 
+      background: #000; 
+      font-family: 'Arcade', monospace;
+    }
+    
+    canvas { 
+      display: block; 
+      background: #111; 
+      image-rendering: pixelated; 
+    }
+    
+    .game-ui {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      pointer-events: none;
+    }
+    
+    .screen {
+      background: rgba(0, 0, 0, 0.85);
+      border: 4px solid #f00;
+      color: #fff;
+      padding: 20px;
+      text-align: center;
+      width: 80%;
+      max-width: 500px;
+      display: none;
+      pointer-events: all;
+    }
+
+    #level-cleared-screen.screen {
+      border: #57266D
+    }
+    #level-cleared-screen.screen .title {
+      color: #7C117B;
+      text-shadow: 0 0 10px #333;
+    }
+    #level-cleared-screen.screen .button {
+      background: #7C117B;
+    }
+    
+    .title {
+      font-size: 36px;
+      color: #f00;
+      text-shadow: 0 0 10px #f00;
+      margin-bottom: 30px;
+      letter-spacing: 2px;
+    }
+    
+    .button {
+      background: #f00;
+      color: #fff;
+      border: none;
+      padding: 10px 20px;
+      margin: 10px;
+      font-size: 18px;
+      cursor: pointer;
+      font-family: 'Arcade', monospace;
+    }
+    
+    .button:hover {
+      background: #ff0;
+      color: #000;
+    }
+    
+    .instructions {
+      margin: 20px 0;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+    
+    .level-cleared {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 48px;
+      color: #ff0;
+      text-shadow: 0 0 15px #ff0;
+      display: none;
+    }
   </style>
 </head>
 <body>
 <canvas id="game"></canvas>
+<div class="game-ui">
+  <div id="intro-screen" class="screen">
+    <h1 class="title">RETRO JUMP</h1>
+    <div class="instructions">
+      <p>MOVE: Arrow Keys or A/D</p>
+      <p>JUMP: Space, Up Arrow, or W</p>
+      <p>MOBILE: Tilt to move, Tap to jump</p>
+    </div>
+    <button id="start-button" class="button">START GAME</button>
+  </div>
+  
+  <div id="level-cleared-screen" class="screen">
+    <h2 class="title">LEVEL CLEARED!</h2>
+    <div id="level-stats">
+      <p>LEVEL: <span id="level-num">1</span></p>
+    </div>
+    <button id="next-level-button" class="button">CONTINUE</button>
+  </div>
+  
+  <div id="game-over-screen" class="screen">
+    <h2 class="title">GAME OVER</h2>
+    <div id="game-stats">
+      <p>HIGHEST LEVEL: <span id="highest-level">1</span></p>
+    </div>
+    <button id="try-again-button" class="button">TRY AGAIN?</button>
+  </div>
+  
+  <div id="level-popup" class="level-cleared">LEVEL CLEARED!</div>
+</div>
+
 <script>
+// Game state constants
+const GAME_STATE = {
+  INTRO: 0,
+  PLAYING: 1,
+  LEVEL_CLEARED: 2,
+  GAME_OVER: 3
+};
+
+let gameState = GAME_STATE.INTRO;
+let highestLevel = 1;
+
+// DOM elements
+const introScreen = document.getElementById('intro-screen');
+const levelClearedScreen = document.getElementById('level-cleared-screen');
+const gameOverScreen = document.getElementById('game-over-screen');
+const levelPopup = document.getElementById('level-popup');
+const startButton = document.getElementById('start-button');
+const nextLevelButton = document.getElementById('next-level-button');
+const tryAgainButton = document.getElementById('try-again-button');
+const levelNumElement = document.getElementById('level-num');
+const highestLevelElement = document.getElementById('highest-level');
+
+// Show intro screen initially
+introScreen.style.display = 'block';
+
+// Button event listeners
+startButton.addEventListener('click', startGame);
+nextLevelButton.addEventListener('click', continueNextLevel);
+tryAgainButton.addEventListener('click', restartGame);
+
+// Game setup
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 let W, H, blockSize, columns;
@@ -22,6 +177,7 @@ const gravity = 0.3;
 const blockGravity = gravity / 4;
 let spawnTimer = 0, spawnInterval = 100;
 let gameEnded = false;
+let levelTransitionTimer = 0;
 
 function resize() {
   const cssW = window.innerWidth;
@@ -56,7 +212,9 @@ class Block {
     this.h = blockSize;
     this.vy = 0;
     this.static = false;
+    this.color = '#00f';
   }
+  
   update() {
     if (!this.static) {
       this.vy += blockGravity;
@@ -74,13 +232,20 @@ class Block {
           player.x + player.w > this.x &&
           player.y < this.y + this.h &&
           player.y + player.h > this.y
-        ) endGame('Game Over!');
+        ) endGame();
       }
     }
   }
+  
   draw() {
-    ctx.fillStyle = '#00f';
+    ctx.fillStyle = this.color;
     ctx.fillRect(this.x, this.y, this.w, this.h);
+    
+    // Add a highlight to give depth
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.fillRect(this.x, this.y, this.w, 5);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.fillRect(this.x, this.y + this.h - 5, this.w, 5);
   }
 }
 
@@ -93,19 +258,26 @@ class Player {
     this.vx = 0;
     this.vy = 0;
     this.onGround = false;
-    this.acc = 0.5;
+    this.acc = 1;
     this.accTap = 0.15;
     this.holdThreshold = 150; // ms
-    this.maxSpeed = 4;
-    this.friction = 0.8;
+    this.maxSpeed = 5;
+    this.friction = 0;
     this.left = false;
     this.right = false;
     this.leftTime = 0;
     this.rightTime = 0;
+    this.color = '#f00';
+    this.trailTimer = 0;
+    this.trail = [];
   }
+  
   update() {
+    if (gameState !== GAME_STATE.PLAYING) return;
+    
     this.vy += gravity;
     const now = performance.now();
+    
     if (this.left) {
       const dt = now - this.leftTime;
       const a = dt < this.holdThreshold ? this.accTap : this.acc;
@@ -128,6 +300,20 @@ class Player {
     const oldY = this.y;
     let newX = oldX + this.vx;
     let newY = oldY + this.vy;
+
+    // Add to trail
+    this.trailTimer++;
+    if (this.trailTimer > 3 && (this.vx !== 0 || this.vy !== 0)) {
+      this.trailTimer = 0;
+      this.trail.push({x: this.x, y: this.y, alpha: 1});
+      if (this.trail.length > 5) this.trail.shift();
+    }
+    
+    // Update trail alpha
+    for (let i = 0; i < this.trail.length; i++) {
+      this.trail[i].alpha -= 0.05;
+      if (this.trail[i].alpha < 0) this.trail[i].alpha = 0;
+    }
 
     // horizontal collision skip feet
     for (let b of blocks) {
@@ -152,6 +338,7 @@ class Player {
       this.vy = 0;
       grounded = true;
     }
+    
     for (let b of blocks) {
       if (!b.static) continue;
       if (newX + this.w > b.x && newX < b.x + b.w) {
@@ -171,63 +358,221 @@ class Player {
     this.y = newY;
     this.onGround = grounded;
 
-    if (this.y + this.h < 0) nextLevel();
+    if (this.y + this.h < 0) {
+      showLevelCleared();
+    }
   }
+  
   draw() {
-    ctx.fillStyle = '#f00';
+    // Draw trail
+    for (let i = 0; i < this.trail.length; i++) {
+      const t = this.trail[i];
+      ctx.fillStyle = `rgba(255, 100, 0, ${t.alpha * 0.7})`;
+      ctx.fillRect(t.x, t.y, this.w, this.h);
+    }
+    
+    // Draw player
+    ctx.fillStyle = this.color;
     ctx.fillRect(this.x, this.y, this.w, this.h);
+    
+    // Add eyes
+    const eyeSize = this.w / 5;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(this.x + this.w/4 - eyeSize/2, this.y + this.h/3, eyeSize, eyeSize);
+    ctx.fillRect(this.x + 3*this.w/4 - eyeSize/2, this.y + this.h/3, eyeSize, eyeSize);
   }
+  
   jump() {
+    if (gameState !== GAME_STATE.PLAYING) return;
+    
     if (this.onGround) {
       this.vy = -Math.sqrt(2 * gravity * blockSize * 2.2);
       this.onGround = false;
+      playSound('jump');
     }
+  }
+  
+  reset() {
+    this.x = (W - this.w) / 2;
+    this.y = H - this.h;
+    this.vx = 0;
+    this.vy = 0;
+    this.trail = [];
+  }
+}
+
+// Create a simple sound system
+const sounds = {
+  jump: { frequency: 300, type: 'square', duration: 0.1 },
+  levelUp: { frequency: 523.25, type: 'sine', duration: 0.3 },
+  gameOver: { frequency: 150, type: 'sawtooth', duration: 0.5 }
+};
+
+function playSound(name) {
+  try {
+    const sound = sounds[name];
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.type = sound.type;
+    oscillator.frequency.value = sound.frequency;
+    gainNode.gain.value = 0.3;
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    oscillator.start();
+    gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + sound.duration);
+    oscillator.stop(audioContext.currentTime + sound.duration);
+  } catch (e) {
+    console.error('Sound not supported');
   }
 }
 
 const blocks = [];
 const player = new Player();
-spawnBlock();
+
+function startGame() {
+  introScreen.style.display = 'none';
+  gameState = GAME_STATE.PLAYING;
+  resetGame();
+  loop();
+}
+
+function resetGame() {
+  blocks.length = 0;
+  level = 1;
+  spawnTimer = 0;
+  gameEnded = false;
+  player.reset();
+  
+  // Set spawn interval based on level
+  spawnInterval = 100 - (level * 5);
+
+  // Increase the spawn interval if the height is larger than the width of the screen
+  if (H > W) spawnInterval = spawnInterval * (W / H);
+
+  spawnInterval = Math.max(spawnInterval, 40);
+}
+
 function spawnBlock() {
   const col = Math.floor(Math.random() * columns);
-  blocks.push(new Block(col * blockSize));
+  const block = new Block(col * blockSize);
+  
+  // Different colors for different levels
+  const colors = ['#00f', '#0ff', '#0f0', '#ff0', '#f80', '#f0f'];
+  block.color = colors[(level - 1) % colors.length];
+  
+  blocks.push(block);
 }
-function nextLevel() {
+
+function showLevelCleared() {
+  gameState = GAME_STATE.LEVEL_CLEARED;
+  
+  // Update highest level
+  if (level > highestLevel) {
+    highestLevel = level;
+  }
+  
+  // Show popup
+  levelPopup.style.display = 'block';
+  levelPopup.style.opacity = 1;
+  
+  // Start fade out animation
+  let opacity = 1;
+  const fadeInterval = setInterval(() => {
+    opacity -= 0.02;
+    levelPopup.style.opacity = opacity;
+    
+    if (opacity <= 0) {
+      clearInterval(fadeInterval);
+      levelPopup.style.display = 'none';
+      
+      // Show level cleared screen
+      levelNumElement.textContent = level;
+      levelClearedScreen.style.display = 'block';
+    }
+  }, 50);
+  
+  playSound('levelUp');
+}
+
+function continueNextLevel() {
   level++;
+  levelClearedScreen.style.display = 'none';
   blocks.length = 0;
   spawnTimer = 0;
-  player.x = (W - player.w) / 2;
-  player.y = H - player.h;
-  player.vx = 0;
-  player.vy = 0;
+  player.reset();
+  
+  // Set spawn interval based on level
+  spawnInterval = 100 - (level * 5);
+  spawnInterval = Math.max(spawnInterval, 40);
+  
+  gameState = GAME_STATE.PLAYING;
 }
+
+function endGame() {
+  gameState = GAME_STATE.GAME_OVER;
+  gameEnded = true;
+  
+  // Update highest level display
+  highestLevelElement.textContent = highestLevel;
+  
+  // Show game over screen
+  gameOverScreen.style.display = 'block';
+  
+  playSound('gameOver');
+}
+
+function restartGame() {
+  gameOverScreen.style.display = 'none';
+  resetGame();
+  startGame();
+}
+
 function update() {
-  if (gameEnded) return;
-  spawnTimer++;
-  if (spawnTimer > spawnInterval) {
-    spawnTimer = 0;
-    spawnBlock();
+  if (gameState === GAME_STATE.PLAYING) {
+    spawnTimer++;
+    if (spawnTimer > spawnInterval) {
+      spawnTimer = 0;
+      spawnBlock();
+    }
+    blocks.forEach(b => b.update());
   }
-  blocks.forEach(b => b.update());
+  
   player.update();
 }
+
 function draw() {
   ctx.clearRect(0, 0, W, H);
+  
+  // Draw blocks
+  blocks.forEach(b => b.draw());
+  
+  // Draw player
+  player.draw();
+  
+  // Draw UI
   ctx.fillStyle = '#fff';
   ctx.font = '20px monospace';
-  ctx.fillText('Level: ' + level, 10, 30);
-  blocks.forEach(b => b.draw());
-  player.draw();
+  ctx.fillText('LEVEL: ' + level, 10, 30);
+  
+  // Draw a finish line at the top
+  ctx.fillStyle = 'rgba(255, 255, 0, 0.5)';
+  ctx.fillRect(0, 0, W, 5);
 }
+
 function loop() {
   update();
   draw();
-  if (!gameEnded) requestAnimationFrame(loop);
+  
+  // Only continue the loop if the game isn't over
+  if (!gameEnded) {
+    requestAnimationFrame(loop);
+  }
 }
-function endGame(msg) {
-  gameEnded = true;
-  setTimeout(() => { alert(msg); window.location.reload(); }, 10);
-}
+
 window.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft' || e.key === 'a') {
     if (!player.left) player.leftTime = performance.now();
@@ -239,16 +584,27 @@ window.addEventListener('keydown', e => {
   }
   if ([' ', 'ArrowUp', 'w'].includes(e.key)) player.jump();
 });
+
 window.addEventListener('keyup', e => {
   if (e.key === 'ArrowLeft' || e.key === 'a') player.left = false;
   if (e.key === 'ArrowRight' || e.key === 'd') player.right = false;
 });
-canvas.addEventListener('touchstart', () => player.jump());
-window.addEventListener('deviceorientation', e => {
-  player.vx = ((e.gamma || 0) / 45) * player.maxSpeed;
+
+canvas.addEventListener('touchstart', () => {
+  if (gameState === GAME_STATE.INTRO) {
+    startGame();
+  } else {
+    player.jump();
+  }
 });
+
+window.addEventListener('deviceorientation', e => {
+  if (gameState === GAME_STATE.PLAYING) {
+    player.vx = ((e.gamma || 0) / 45) * player.maxSpeed;
+  }
+});
+
 resize();
-loop();
 </script>
 </body>
 </html>
