@@ -193,9 +193,7 @@ let levelTransitionTimer = 0;
 
 const BLOCK_TYPES = {
   NORMAL: { color: '#00f', probability: 0.6 },
-  MOVING: { color: '#0f0', probability: 0.2 },
-  DISAPPEARING: { color: '#f00', probability: 0.1 },
-  BOUNCY: { color: '#ff0', probability: 0.1 }
+  MOVING: { color: '#0f0', probability: 0.4 }
 };
 
 function resize() {
@@ -248,9 +246,6 @@ class Block {
     // Block-specific properties
     this.moveDirection = 1;
     this.moveSpeed = 2;
-    this.disappearTimer = 0;
-    this.disappearing = false;
-    this.bounceStrength = 1.5;
   }
   
   update() {
@@ -273,25 +268,11 @@ class Block {
       }
     } else {
       // Update block-specific behavior
-      switch(this.type) {
-        case 'MOVING':
-          this.x += this.moveSpeed * this.moveDirection;
-          if (this.x <= 0 || this.x + this.w >= W) {
-            this.moveDirection *= -1;
-          }
-          break;
-          
-        case 'DISAPPEARING':
-          if (this.disappearing) {
-            this.disappearTimer++;
-            if (this.disappearTimer > 60) { // Disappear after 1 second
-              const index = blocks.indexOf(this);
-              if (index > -1) {
-                blocks.splice(index, 1);
-              }
-            }
-          }
-          break;
+      if (this.type === 'MOVING') {
+        this.x += this.moveSpeed * this.moveDirection;
+        if (this.x <= 0 || this.x + this.w >= W) {
+          this.moveDirection *= -1;
+        }
       }
     }
     
@@ -303,17 +284,7 @@ class Block {
       player.y + player.h > this.y
     ) {
       if (!player.hasShield) {
-        if (this.type === 'BOUNCY' && player.vy > 0) {
-          // Bounce the player higher
-          player.vy = -Math.sqrt(2 * gravity * blockSize * this.bounceStrength);
-          playSound('jump');
-        } else if (this.type === 'DISAPPEARING' && !this.disappearing) {
-          // Start disappearing sequence
-          this.disappearing = true;
-          this.disappearTimer = 0;
-        } else {
-          endGame();
-        }
+        endGame();
       }
     }
   }
@@ -338,43 +309,23 @@ class Block {
     }
     
     // Draw type-specific effects
-    switch(this.type) {
-      case 'MOVING':
-        // Draw arrow indicators
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-        const arrowSize = this.w / 4;
-        if (this.moveDirection > 0) {
-          ctx.beginPath();
-          ctx.moveTo(this.x + this.w - arrowSize, this.y + this.h/2);
-          ctx.lineTo(this.x + this.w - arrowSize*2, this.y + this.h/2 - arrowSize);
-          ctx.lineTo(this.x + this.w - arrowSize*2, this.y + this.h/2 + arrowSize);
-          ctx.fill();
-        } else {
-          ctx.beginPath();
-          ctx.moveTo(this.x + arrowSize, this.y + this.h/2);
-          ctx.lineTo(this.x + arrowSize*2, this.y + this.h/2 - arrowSize);
-          ctx.lineTo(this.x + arrowSize*2, this.y + this.h/2 + arrowSize);
-          ctx.fill();
-        }
-        break;
-        
-      case 'DISAPPEARING':
-        if (this.disappearing) {
-          // Draw disappearing effect
-          const alpha = 1 - (this.disappearTimer / 60);
-          ctx.fillStyle = `rgba(255, 0, 0, ${alpha})`;
-          ctx.fillRect(this.x, this.y, this.w, this.h);
-        }
-        break;
-        
-      case 'BOUNCY':
-        // Draw bouncy effect
-        ctx.strokeStyle = '#ff0';
-        ctx.lineWidth = 2;
+    if (this.type === 'MOVING') {
+      // Draw arrow indicators
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+      const arrowSize = this.w / 4;
+      if (this.moveDirection > 0) {
         ctx.beginPath();
-        ctx.arc(this.x + this.w/2, this.y + this.h/2, this.w/3, 0, Math.PI * 2);
-        ctx.stroke();
-        break;
+        ctx.moveTo(this.x + this.w - arrowSize, this.y + this.h/2);
+        ctx.lineTo(this.x + this.w - arrowSize*2, this.y + this.h/2 - arrowSize);
+        ctx.lineTo(this.x + this.w - arrowSize*2, this.y + this.h/2 + arrowSize);
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(this.x + arrowSize, this.y + this.h/2);
+        ctx.lineTo(this.x + arrowSize*2, this.y + this.h/2 - arrowSize);
+        ctx.lineTo(this.x + arrowSize*2, this.y + this.h/2 + arrowSize);
+        ctx.fill();
+      }
     }
   }
 }
