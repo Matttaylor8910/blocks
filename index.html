@@ -146,6 +146,18 @@ const GAME_STATE = {
 
 let gameState = GAME_STATE.INTRO;
 let highestLevel = 1;
+let score = 0;
+let highScore = 0;
+
+// Power-up types
+const POWER_UPS = {
+  DOUBLE_JUMP: { color: '#ff0', duration: 10000, active: false },
+  SHIELD: { color: '#0ff', duration: 8000, active: false },
+  SPEED_BOOST: { color: '#0f0', duration: 5000, active: false }
+};
+
+let activePowerUps = [];
+let powerUpTimer = 0;
 
 // DOM elements
 const introScreen = document.getElementById('intro-screen');
@@ -178,6 +190,13 @@ const blockGravity = gravity / 4;
 let spawnTimer = 0, spawnInterval = 100;
 let gameEnded = false;
 let levelTransitionTimer = 0;
+
+const BLOCK_TYPES = {
+  NORMAL: { color: '#00f', probability: 0.6 },
+  MOVING: { color: '#0f0', probability: 0.2 },
+  DISAPPEARING: { color: '#f00', probability: 0.1 },
+  BOUNCY: { color: '#ff0', probability: 0.1 }
+};
 
 function resize() {
   const cssW = window.innerWidth;
@@ -212,7 +231,26 @@ class Block {
     this.h = blockSize;
     this.vy = 0;
     this.static = false;
-    this.color = '#00f';
+    this.hasPowerUp = Math.random() < 0.1; // 10% chance to have a power-up
+    
+    // Randomly select block type based on probabilities
+    const rand = Math.random();
+    let cumulative = 0;
+    for (const [type, data] of Object.entries(BLOCK_TYPES)) {
+      cumulative += data.probability;
+      if (rand <= cumulative) {
+        this.type = type;
+        this.color = data.color;
+        break;
+      }
+    }
+    
+    // Block-specific properties
+    this.moveDirection = 1;
+    this.moveSpeed = 2;
+    this.disappearTimer = 0;
+    this.disappearing = false;
+    this.bounceStrength = 1.5;
   }
   
   update() {
@@ -227,17 +265,61 @@ class Block {
         this.y = rest;
         this.static = true;
         this.vy = 0;
-        if (
-          player.x < this.x + this.w &&
-          player.x + player.w > this.x &&
-          player.y < this.y + this.h &&
-          player.y + player.h > this.y
-        ) endGame();
+        
+        // Spawn power-up when block becomes static if it has one
+        if (this.hasPowerUp) {
+          spawnPowerUp(this.x, this.y - this.h);
+        }
+      }
+    } else {
+      // Update block-specific behavior
+      switch(this.type) {
+        case 'MOVING':
+          this.x += this.moveSpeed * this.moveDirection;
+          if (this.x <= 0 || this.x + this.w >= W) {
+            this.moveDirection *= -1;
+          }
+          break;
+          
+        case 'DISAPPEARING':
+          if (this.disappearing) {
+            this.disappearTimer++;
+            if (this.disappearTimer > 60) { // Disappear after 1 second
+              const index = blocks.indexOf(this);
+              if (index > -1) {
+                blocks.splice(index, 1);
+              }
+            }
+          }
+          break;
+      }
+    }
+    
+    // Check for collision with player
+    if (
+      player.x < this.x + this.w &&
+      player.x + player.w > this.x &&
+      player.y < this.y + this.h &&
+      player.y + player.h > this.y
+    ) {
+      if (!player.hasShield) {
+        if (this.type === 'BOUNCY' && player.vy > 0) {
+          // Bounce the player higher
+          player.vy = -Math.sqrt(2 * gravity * blockSize * this.bounceStrength);
+          playSound('jump');
+        } else if (this.type === 'DISAPPEARING' && !this.disappearing) {
+          // Start disappearing sequence
+          this.disappearing = true;
+          this.disappearTimer = 0;
+        } else {
+          endGame();
+        }
       }
     }
   }
   
   draw() {
+    // Draw block with type-specific effects
     ctx.fillStyle = this.color;
     ctx.fillRect(this.x, this.y, this.w, this.h);
     
@@ -246,7 +328,154 @@ class Block {
     ctx.fillRect(this.x, this.y, this.w, 5);
     ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
     ctx.fillRect(this.x, this.y + this.h - 5, this.w, 5);
+
+    // Draw power-up indicator
+    if (this.hasPowerUp) {
+      ctx.fillStyle = '#ff0';
+      ctx.beginPath();
+      ctx.arc(this.x + this.w/2, this.y + this.h/2, this.w/4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    
+    // Draw type-specific effects
+    switch(this.type) {
+      case 'MOVING':
+        // Draw arrow indicators
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        const arrowSize = this.w / 4;
+        if (this.moveDirection > 0) {
+          ctx.beginPath();
+          ctx.moveTo(this.x + this.w - arrowSize, this.y + this.h/2);
+          ctx.lineTo(this.x + this.w - arrowSize*2, this.y + this.h/2 - arrowSize);
+          ctx.lineTo(this.x + this.w - arrowSize*2, this.y + this.h/2 + arrowSize);
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(this.x + arrowSize, this.y + this.h/2);
+          ctx.lineTo(this.x + arrowSize*2, this.y + this.h/2 - arrowSize);
+          ctx.lineTo(this.x + arrowSize*2, this.y + this.h/2 + arrowSize);
+          ctx.fill();
+        }
+        break;
+        
+      case 'DISAPPEARING':
+        if (this.disappearing) {
+          // Draw disappearing effect
+          const alpha = 1 - (this.disappearTimer / 60);
+          ctx.fillStyle = `rgba(255, 0, 0, ${alpha})`;
+          ctx.fillRect(this.x, this.y, this.w, this.h);
+        }
+        break;
+        
+      case 'BOUNCY':
+        // Draw bouncy effect
+        ctx.strokeStyle = '#ff0';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(this.x + this.w/2, this.y + this.h/2, this.w/3, 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+    }
   }
+}
+
+class PowerUp {
+  constructor(x, y, type) {
+    this.x = x;
+    this.y = y;
+    this.w = blockSize / 2;
+    this.h = blockSize / 2;
+    this.type = type;
+    this.vy = -2; // Float upward initially
+    this.color = POWER_UPS[type].color;
+    this.floatTimer = 0;
+  }
+
+  update() {
+    this.floatTimer += 0.1;
+    this.vy = Math.sin(this.floatTimer) * 2; // Floating motion
+    this.y += this.vy;
+
+    // Check collision with player
+    if (
+      player.x < this.x + this.w &&
+      player.x + player.w > this.x &&
+      player.y < this.y + this.h &&
+      player.y + player.h > this.y
+    ) {
+      activatePowerUp(this.type);
+      return true; // Remove power-up
+    }
+
+    // Remove if off screen
+    if (this.y < -this.h || this.y > H) return true;
+    return false;
+  }
+
+  draw() {
+    // Draw power-up with floating animation
+    ctx.fillStyle = this.color;
+    ctx.beginPath();
+    ctx.arc(this.x + this.w/2, this.y + this.h/2, this.w/2, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Add glow effect
+    ctx.shadowColor = this.color;
+    ctx.shadowBlur = 10;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+}
+
+const powerUps = [];
+
+function spawnPowerUp(x, y) {
+  const types = Object.keys(POWER_UPS);
+  const type = types[Math.floor(Math.random() * types.length)];
+  powerUps.push(new PowerUp(x, y, type));
+}
+
+function activatePowerUp(type) {
+  const powerUp = POWER_UPS[type];
+  powerUp.active = true;
+  activePowerUps.push({ type, endTime: performance.now() + powerUp.duration });
+  
+  // Apply power-up effects
+  switch(type) {
+    case 'DOUBLE_JUMP':
+      player.canDoubleJump = true;
+      break;
+    case 'SHIELD':
+      player.hasShield = true;
+      break;
+    case 'SPEED_BOOST':
+      player.maxSpeed *= 1.5;
+      break;
+  }
+  
+  playSound('powerUp');
+}
+
+function updatePowerUps() {
+  const now = performance.now();
+  activePowerUps = activePowerUps.filter(powerUp => {
+    if (now > powerUp.endTime) {
+      // Remove power-up effects
+      switch(powerUp.type) {
+        case 'DOUBLE_JUMP':
+          player.canDoubleJump = false;
+          break;
+        case 'SHIELD':
+          player.hasShield = false;
+          break;
+        case 'SPEED_BOOST':
+          player.maxSpeed /= 1.5;
+          break;
+      }
+      return false;
+    }
+    return true;
+  });
 }
 
 class Player {
@@ -270,6 +499,9 @@ class Player {
     this.color = '#f00';
     this.trailTimer = 0;
     this.trail = [];
+    this.canDoubleJump = false;
+    this.hasShield = false;
+    this.jumpsLeft = 1;
   }
   
   update() {
@@ -337,6 +569,7 @@ class Player {
       newY = H - this.h;
       this.vy = 0;
       grounded = true;
+      this.jumpsLeft = this.canDoubleJump ? 2 : 1;
     }
     
     for (let b of blocks) {
@@ -346,6 +579,7 @@ class Player {
           newY = b.y - this.h;
           this.vy = 0;
           grounded = true;
+          this.jumpsLeft = this.canDoubleJump ? 2 : 1;
         }
         if (this.vy < 0 && oldY >= b.y + b.h && newY < b.y + b.h) {
           newY = b.y + b.h;
@@ -371,6 +605,15 @@ class Player {
       ctx.fillRect(t.x, t.y, this.w, this.h);
     }
     
+    // Draw shield effect
+    if (this.hasShield) {
+      ctx.strokeStyle = '#0ff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(this.x + this.w/2, this.y + this.h/2, this.w * 0.8, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    
     // Draw player
     ctx.fillStyle = this.color;
     ctx.fillRect(this.x, this.y, this.w, this.h);
@@ -385,8 +628,9 @@ class Player {
   jump() {
     if (gameState !== GAME_STATE.PLAYING) return;
     
-    if (this.onGround) {
+    if (this.jumpsLeft > 0) {
       this.vy = -Math.sqrt(2 * gravity * blockSize * 2.2);
+      this.jumpsLeft--;
       this.onGround = false;
       playSound('jump');
     }
@@ -398,6 +642,9 @@ class Player {
     this.vx = 0;
     this.vy = 0;
     this.trail = [];
+    this.canDoubleJump = false;
+    this.hasShield = false;
+    this.jumpsLeft = 1;
   }
 }
 
@@ -405,7 +652,8 @@ class Player {
 const sounds = {
   jump: { frequency: 300, type: 'square', duration: 0.1 },
   levelUp: { frequency: 523.25, type: 'sine', duration: 0.3 },
-  gameOver: { frequency: 150, type: 'sawtooth', duration: 0.5 }
+  gameOver: { frequency: 150, type: 'sawtooth', duration: 0.5 },
+  powerUp: { frequency: 800, type: 'sine', duration: 0.3 }
 };
 
 function playSound(name) {
@@ -442,17 +690,16 @@ function startGame() {
 
 function resetGame() {
   blocks.length = 0;
+  powerUps.length = 0;
+  activePowerUps = [];
   level = 1;
+  score = 0;
   spawnTimer = 0;
   gameEnded = false;
   player.reset();
   
   // Set spawn interval based on level
   spawnInterval = 100 - (level * 5);
-
-  // Increase the spawn interval if the height is larger than the width of the screen
-  if (H > W) spawnInterval = spawnInterval * (W / H);
-
   spawnInterval = Math.max(spawnInterval, 40);
 }
 
@@ -460,19 +707,18 @@ function spawnBlock() {
   const col = Math.floor(Math.random() * columns);
   const block = new Block(col * blockSize);
   
-  // Different colors for different levels
-  const colors = ['#00f', '#0ff', '#0f0', '#ff0', '#f80', '#f0f'];
-  block.color = colors[(level - 1) % colors.length];
-  
   blocks.push(block);
 }
 
 function showLevelCleared() {
   gameState = GAME_STATE.LEVEL_CLEARED;
   
-  // Update highest level
+  // Update highest level and score
   if (level > highestLevel) {
     highestLevel = level;
+  }
+  if (score > highScore) {
+    highScore = score;
   }
   
   // Show popup
@@ -516,8 +762,11 @@ function endGame() {
   gameState = GAME_STATE.GAME_OVER;
   gameEnded = true;
   
-  // Update highest level display
+  // Update highest level and score display
   highestLevelElement.textContent = highestLevel;
+  if (score > highScore) {
+    highScore = score;
+  }
   
   // Show game over screen
   gameOverScreen.style.display = 'block';
@@ -539,6 +788,17 @@ function update() {
       spawnBlock();
     }
     blocks.forEach(b => b.update());
+    
+    // Update power-ups
+    for (let i = powerUps.length - 1; i >= 0; i--) {
+      if (powerUps[i].update()) {
+        powerUps.splice(i, 1);
+      }
+    }
+    updatePowerUps();
+    
+    // Add score for surviving
+    score += 1;
   }
   
   player.update();
@@ -550,6 +810,9 @@ function draw() {
   // Draw blocks
   blocks.forEach(b => b.draw());
   
+  // Draw power-ups
+  powerUps.forEach(p => p.draw());
+  
   // Draw player
   player.draw();
   
@@ -557,6 +820,16 @@ function draw() {
   ctx.fillStyle = '#fff';
   ctx.font = '20px monospace';
   ctx.fillText('LEVEL: ' + level, 10, 30);
+  ctx.fillText('SCORE: ' + score, 10, 60);
+  
+  // Draw active power-ups
+  let powerUpY = 90;
+  activePowerUps.forEach(powerUp => {
+    const remaining = Math.ceil((powerUp.endTime - performance.now()) / 1000);
+    ctx.fillStyle = POWER_UPS[powerUp.type].color;
+    ctx.fillText(powerUp.type + ': ' + remaining + 's', 10, powerUpY);
+    powerUpY += 30;
+  });
   
   // Draw a finish line at the top
   ctx.fillStyle = 'rgba(255, 255, 0, 0.5)';
