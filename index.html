@@ -192,8 +192,8 @@ let gameEnded = false;
 let levelTransitionTimer = 0;
 
 const BLOCK_TYPES = {
-  NORMAL: { color: '#00f', probability: 0.6 },
-  MOVING: { color: '#0f0', probability: 0.4 }
+  NORMAL: { color: '#00f', probability: 0.8 },
+  MOVING: { color: '#0f0', probability: 0.2 }
 };
 
 function resize() {
@@ -269,9 +269,31 @@ class Block {
     } else {
       // Update block-specific behavior
       if (this.type === 'MOVING') {
-        this.x += this.moveSpeed * this.moveDirection;
-        if (this.x <= 0 || this.x + this.w >= W) {
+        const newX = this.x + this.moveSpeed * this.moveDirection;
+        
+        // Check for collisions with other blocks
+        let shouldChangeDirection = false;
+        
+        // Check screen boundaries
+        if (newX <= 0 || newX + this.w >= W) {
+          shouldChangeDirection = true;
+        }
+        
+        // Check collisions with other blocks
+        for (let b of blocks) {
+          if (b === this || !b.static) continue;
+          
+          // Check if moving block would collide with another block
+          if (newX + this.w > b.x && newX < b.x + b.w && this.y + this.h > b.y && this.y < b.y + b.h) {
+            shouldChangeDirection = true;
+            break;
+          }
+        }
+        
+        if (shouldChangeDirection) {
           this.moveDirection *= -1;
+        } else {
+          this.x = newX;
         }
       }
     }
